@@ -17,6 +17,15 @@ readme = "README.md"
 dynamic = ["version"]
 
 dependencies = [
+    "numpy==1.23.5",
+    "allensdk==2.16.2",
+    "zarr==2.18.2",
+    "antspyx==0.6.1",
+    "scipy==1.10.1",
+    "s3fs==2025.5.1",
+    "networkx==3.4.2",
+    "scikit-learn==1.7.0",
+    "pandas==1.5.3"
 ]
 
 [project.optional-dependencies]

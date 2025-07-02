@@ -1,0 +1,245 @@
+"""Registration pipeline for transforming exaSPIM cell data to CCF space.
+
+This module provides the main registration pipeline for transforming
+points from image space to CCF space using registration transforms.
+"""
+
+import json
+import os
+from typing import List
+
+import ants
+import numpy as np
+import pandas as pd
+from allensdk.core.swc import Compartment, Morphology
+
+from .utils import CoordinateConverter, OrientationUtils
+from .visualization import ImageVisualizer
+
+class RegistrationPipeline:
+    """
+    Main pipeline for transforming points from image space to CCF space using registration transforms.
+    """
+    def __init__(self, 
+        dataset_id: str, 
+        output_dir: str, 
+        swc_dir: str, 
+        acquisition_file: str, 
+        brain_path: str, 
+        resampled_brain_path: str, 
+        brain_to_exaspim_transform_path: list,
+        exaspim_to_ccf_transform_path: list, 
+        ccf_path: str, 
+        exaspim_template_path: str, 
+        transform_res: list, 
+        level: int):
+        self.dataset_id = dataset_id
+        self.output_dir = output_dir
+        self.swc_dir = swc_dir
+        self.acquisition_file = acquisition_file
+        self.brain_path = brain_path
+        self.resampled_brain_path = resampled_brain_path
+        self.brain_to_exaspim_transform_path = brain_to_exaspim_transform_path
+        self.exaspim_to_ccf_transform_path = exaspim_to_ccf_transform_path
+        self.ccf_path = ccf_path
+        self.exaspim_template_path = exaspim_template_path
+        self.transform_res = transform_res
+        self.aligned_dir = os.path.join(self.output_dir, 'aligned')
+        self.level = level
+        os.makedirs(self.aligned_dir, exist_ok=True)
+
+    def load_images(self) -> tuple:
+        """
+        Load and preprocess CCF, exaspim template, brain, and resampled brain images.
+
+        Returns
+        -------
+        tuple
+            (ccf, ants_exaspim, brain_img, resampled_img)
+        """
+        ccf = ants.image_read(self.ccf_path)
+        ccf = ImageVisualizer.perc_normalization(ccf)
+        ants_exaspim = ants.image_read(self.exaspim_template_path)
+        ants_exaspim.set_spacing(ccf.spacing)
+        ants_exaspim.set_origin(ccf.origin)
+        ants_exaspim.set_direction(ccf.direction)
+        brain_img = ants.image_read(self.brain_path)
+        resampled_img = ants.image_read(self.resampled_brain_path)
+        return ccf, ants_exaspim, brain_img, resampled_img
+
+    def preprocess_coords(self, coords: np.ndarray, input_img: np.ndarray, resampled_img: np.ndarray) -> np.ndarray:
+        """
+        Preprocess coordinates: convert to index, check orientation, and resample to isotropic.
+
+        Parameters
+        ----------
+        coords : np.ndarray
+            Soma coordinates in physical space.
+        input_img : np.ndarray
+            Reference image for orientation.
+        resampled_img : np.ndarray
+            Reference resampled image.
+        Returns
+        -------
+        np.ndarray
+            Preprocessed coordinates.
+        """
+        if self.level == 3:
+            scale = [0.02025/0.025, 0.02025/0.025, 0.027/0.025] # xyz
+        elif self.level == 2:
+            scale = [0.0101/0.01, 0.0101/0.01, 0.0135/0.01] #  xyz 1.08, 0.812, 0.812
+        else:
+            raise ValueError(f"Level {self.level} not supported, only support 2 and 3")
+
+        soma_locations = self.soma_physical_to_index(coords, self.level+3)
+        
+        oriented_cells = self.check_orientation(self.acquisition_file, soma_locations, input_img)
+        input_img_norm = ImageVisualizer.perc_normalization(input_img)
+        ImageVisualizer.soma_overlay_volumn(oriented_cells, input_img_norm, title=f"oriented cells")
+        
+        resampled_cells = self.resample_isotropic(oriented_cells, scale)
+        resampled_img_norm = ImageVisualizer.perc_normalization(resampled_img)
+        ImageVisualizer.soma_overlay_volumn(resampled_cells, resampled_img_norm, title=f"resampled data space")
+        return resampled_cells
+
+    def apply_transforms_to_points(
+        self, 
+        resampled_cells: np.ndarray, 
+        resampled_img: ants.ANTsImage, 
+        ants_exaspim: ants.ANTsImage, 
+        ccf: ants.ANTsImage,
+        show: bool = False
+    ) -> np.ndarray:
+        """
+        Apply registration transforms to points and return final CCF index coordinates.
+
+        Parameters
+        ----------
+        resampled_cells : np.ndarray
+            Preprocessed soma coordinates.
+        resampled_img : ants.ANTsImage
+            Resampled brain image.
+        ants_exaspim : ants.ANTsImage
+            Exaspim template image.
+        ccf : ants.ANTsImage
+            CCF template image.
+
+        Returns
+        -------
+        np.ndarray
+            Final CCF index coordinates.
+        """
+        # register to exaspim template
+        ants_pts = CoordinateConverter.index_to_physical(resampled_img, resampled_cells)
+        df = pd.DataFrame(ants_pts, columns=["x", "y", "z"])
+        ants_pts = ants.apply_transforms_to_points(
+            3, df, self.brain_to_exaspim_transform_path, whichtoinvert=[True, False]
+        )
+        ants_pts_exaspim = np.array(ants_pts)
+        idx_pts = CoordinateConverter.physical_to_index(ants_exaspim, ants_pts_exaspim)
+        ImageVisualizer.soma_overlay_volumn(idx_pts, ants_exaspim.numpy(), title=f"exaspim space")
+        
+        # register to ccf
+        df = pd.DataFrame(ants_pts_exaspim, columns=["x", "y", "z"])
+        ants_pts = ants.apply_transforms_to_points(
+            3, df, self.exaspim_to_ccf_transform_path, whichtoinvert=[True, False]
+        )
+        ants_pts_ccf = np.array(ants_pts)
+        idx_pts = CoordinateConverter.physical_to_index(ccf, ants_pts_ccf)
+        ImageVisualizer.soma_overlay_volumn(idx_pts, ccf.numpy(), title=f"CCF space")
+                
+        return idx_pts
+
+    def check_orientation(
+        self, 
+        acquisition_path: str, 
+        soma_locations: np.ndarray, 
+        input_img: np.ndarray,
+        show: bool = False
+    ) -> np.ndarray:
+        """
+        Adjust soma locations based on acquisition metadata orientation.
+
+        Parameters
+        ----------
+        acquisition_path : str
+            Path to acquisition metadata JSON.
+        soma_locations : np.ndarray
+            Soma locations to adjust.
+        input_img : np.ndarray
+            Reference image for shape.
+
+        Returns
+        -------
+        np.ndarray
+            Oriented soma locations.
+        """
+        with open(acquisition_path, "r") as f:
+            metadata = json.load(f)
+            file_name_1st = metadata["tiles"][0]["file_name"]
+            if "tile_000000_ch_" in file_name_1st:
+                # print("The input is a Beta scope sample!!")
+                CCF_DIRECTIONS = {
+                    0: "Anterior_to_posterior",
+                    1: "Superior_to_inferior",
+                    2: "Left_to_right",
+                }
+            else:
+                # print("The input is a Alpha scope sample!!")
+                CCF_DIRECTIONS = {
+                    0: "Posterior_to_anterior",
+                    1: "Inferior_to_superior",
+                    2: "Left_to_right",
+                }
+        swaps, flips = OrientationUtils.get_adjustments(metadata['axes'], CCF_DIRECTIONS)
+        for a, b in swaps:
+            soma_locations[:, [a, b]] = soma_locations[:, [b, a]]
+        image_shape = input_img.shape
+        for ax in flips:
+            soma_locations[:, ax] = image_shape[ax] - 1 - soma_locations[:, ax]
+        return soma_locations
+
+    def resample_isotropic(self, soma_locations: np.ndarray, scale: list) -> np.ndarray:
+        """
+        Resample soma locations to isotropic resolution.
+
+        Parameters
+        ----------
+        soma_locations : np.ndarray
+            Soma locations to resample.
+        scale : list
+            Scaling factors for each axis.
+
+        Returns
+        -------
+        np.ndarray
+            Resampled soma locations.
+        """
+        scaled_cells = []
+        for cell in soma_locations:
+            scaled_cells.append(
+                [cell[0] * scale[0], cell[1] * scale[1], cell[2] * scale[2]]
+            )
+        return np.array(scaled_cells)
+
+    def soma_physical_to_index(self, soma_locations_xyz: np.ndarray, level: int) -> np.ndarray:
+        """
+        Convert soma locations from physical to voxel space.
+
+        Parameters
+        ----------
+        soma_locations_xyz : np.ndarray
+            Soma locations in physical coordinates.
+        level : int
+            Pyramid level for voxelization.
+
+        Returns
+        -------
+        np.ndarray
+            Voxel coordinates.
+        """
+        anisotropy = np.array([0.748, 0.748, 1.0])
+        soma_locations = np.zeros((len(soma_locations_xyz), 3))
+        for i, xyz in enumerate(soma_locations_xyz):
+            soma_locations[i] = CoordinateConverter.to_voxels(xyz, anisotropy, level)
+        return soma_locations 
