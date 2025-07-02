@@ -67,7 +67,7 @@ class RegistrationPipeline:
         resampled_img = ants.image_read(self.resampled_brain_path)
         return ccf, ants_exaspim, brain_img, resampled_img
 
-    def preprocess_coords(self, coords: np.ndarray, input_img: np.ndarray, resampled_img: np.ndarray) -> np.ndarray:
+    def preprocess_coords(self, coords: np.ndarray, input_img: np.ndarray, resampled_img: np.ndarray, cell_filename: str = None) -> np.ndarray:
         """
         Preprocess coordinates: convert to index, check orientation, and resample to isotropic.
 
@@ -95,11 +95,13 @@ class RegistrationPipeline:
         
         oriented_cells = self.check_orientation(self.acquisition_file, soma_locations, input_img)
         input_img_norm = ImageVisualizer.perc_normalization(input_img)
-        ImageVisualizer.soma_overlay_volumn(oriented_cells, input_img_norm, title=f"oriented cells")
+        if cell_filename:
+            ImageVisualizer.soma_overlay_volumn(oriented_cells, input_img_norm, title=f"{cell_filename}_in_raw_data_space", figpath=f"{self.output_dir}/{cell_filename}_in_raw_data_space")
         
         resampled_cells = self.resample_isotropic(oriented_cells, scale)
         resampled_img_norm = ImageVisualizer.perc_normalization(resampled_img)
-        ImageVisualizer.soma_overlay_volumn(resampled_cells, resampled_img_norm, title=f"resampled data space")
+        if cell_filename:
+            ImageVisualizer.soma_overlay_volumn(resampled_cells, resampled_img_norm, title=f"{cell_filename}_in_resampled_space", figpath=f"{self.output_dir}/{cell_filename}_in_resampled_space")
         return resampled_cells
 
     def apply_transforms_to_points(
@@ -108,7 +110,7 @@ class RegistrationPipeline:
         resampled_img: ants.ANTsImage, 
         ants_exaspim: ants.ANTsImage, 
         ccf: ants.ANTsImage,
-        show: bool = False
+        cell_filename: str = None
     ) -> np.ndarray:
         """
         Apply registration transforms to points and return final CCF index coordinates.
@@ -137,7 +139,8 @@ class RegistrationPipeline:
         )
         ants_pts_exaspim = np.array(ants_pts)
         idx_pts = CoordinateConverter.physical_to_index(ants_exaspim, ants_pts_exaspim)
-        ImageVisualizer.soma_overlay_volumn(idx_pts, ants_exaspim.numpy(), title=f"exaspim space")
+        if cell_filename:
+            ImageVisualizer.soma_overlay_volumn(idx_pts, ants_exaspim.numpy(), title=f"{cell_filename}_in_exaspim_temp_space", figpath=f"{self.output_dir}/{cell_filename}_in_exaspim_temp_space")
         
         # register to ccf
         df = pd.DataFrame(ants_pts_exaspim, columns=["x", "y", "z"])
@@ -146,7 +149,8 @@ class RegistrationPipeline:
         )
         ants_pts_ccf = np.array(ants_pts)
         idx_pts = CoordinateConverter.physical_to_index(ccf, ants_pts_ccf)
-        ImageVisualizer.soma_overlay_volumn(idx_pts, ccf.numpy(), title=f"CCF space")
+        if cell_filename:
+            ImageVisualizer.soma_overlay_volumn(idx_pts, ccf.numpy(),title=f"{cell_filename}_in_ccf_space", figpath=f"{self.output_dir}/{cell_filename}_in_ccf_space")
                 
         return idx_pts
 

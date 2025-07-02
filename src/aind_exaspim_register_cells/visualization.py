@@ -112,8 +112,8 @@ class ImageVisualizer:
         ImageVisualizer.overlay_slice(volume, points, axis='z', index=shape[2] // 2, ax=axes[2])
         fig.suptitle(title, fontsize=16, y=0.8)
         plt.tight_layout()
-        plt.show()
-        # plt.savefig(figpath, bbox_inches="tight", pad_inches=0.1)
+        # plt.show()
+        plt.savefig(figpath, bbox_inches="tight", pad_inches=0.1)
 
     @staticmethod
     def overlay_slice(volume: np.ndarray, points: np.ndarray, axis: str = 'z', index: int = 25, ax=None) -> None:
