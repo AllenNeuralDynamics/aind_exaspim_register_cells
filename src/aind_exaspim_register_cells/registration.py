@@ -23,7 +23,6 @@ class RegistrationPipeline:
     def __init__(self, 
         dataset_id: str, 
         output_dir: str, 
-        swc_dir: str, 
         acquisition_file: str, 
         brain_path: str, 
         resampled_brain_path: str, 
@@ -35,7 +34,6 @@ class RegistrationPipeline:
         level: int):
         self.dataset_id = dataset_id
         self.output_dir = output_dir
-        self.swc_dir = swc_dir
         self.acquisition_file = acquisition_file
         self.brain_path = brain_path
         self.resampled_brain_path = resampled_brain_path
