@@ -12,6 +12,7 @@ import ants
 import numpy as np
 import pandas as pd
 from allensdk.core.swc import Compartment, Morphology
+import SimpleITK as sitk
 
 from .utils import CoordinateConverter, OrientationUtils
 from .visualization import ImageVisualizer
@@ -132,6 +133,7 @@ class RegistrationPipeline:
             Final CCF index coordinates.
         """
        # register to exaspim template
+        print("Register to exaspim template ...")
         ants_pts = CoordinateConverter.index_to_physical(resampled_img, resampled_cells)
         df = pd.DataFrame(ants_pts, columns=["x", "y", "z"])
         # Dynamically set whichtoinvert based on the number of transforms
@@ -148,6 +150,7 @@ class RegistrationPipeline:
             ImageVisualizer.soma_overlay_volumn(idx_pts, ants_exaspim.numpy(), title=f"{cell_filename}_in_exaspim_temp_space", figpath=f"{self.output_dir}/{cell_filename}_in_exaspim_temp_space")
         
         # register to ccf
+        print("Register to CCF ...")
         df = pd.DataFrame(ants_pts_exaspim, columns=["x", "y", "z"])
         if self.exaspim_to_ccf_transform_path:
             # Only apply transform if the list is not empty
@@ -166,6 +169,22 @@ class RegistrationPipeline:
         if cell_filename:
             ImageVisualizer.soma_overlay_volumn(idx_pts, ccf.numpy(),title=f"{cell_filename}_in_ccf_space", figpath=f"{self.output_dir}/{cell_filename}_in_ccf_space")
             
+            
+        # manual registration 
+        # Check if any transform is in .nrrd format
+        df_manual = pd.DataFrame(ants_pts_ccf, columns=["x", "y", "z"])
+        nrrd_transforms = [t for t in self.manual_transform_path if t.endswith('.nrrd')]
+
+        # Apply SimpleITK transforms for .nrrd files
+        if nrrd_transforms:
+            print("Apply manual transfrom ...")
+            for nrrd_transform in nrrd_transforms:
+                df_manual = self.apply_simpleitk_transform(nrrd_transform, df_manual)
+        ants_pts_ccf = np.array(df_manual)
+        idx_pts = CoordinateConverter.physical_to_index(ccf, ants_pts_ccf)
+        if cell_filename:
+            ImageVisualizer.soma_overlay_volumn(idx_pts, ccf.numpy(),title=f"{cell_filename}_in_ccf_space_manual", figpath=f"{self.output_dir}/{cell_filename}_in_ccf_space_manual")
+
         return idx_pts, ants_pts_ccf
                 
 
@@ -262,3 +281,95 @@ class RegistrationPipeline:
         for i, xyz in enumerate(soma_locations_xyz):
             soma_locations[i] = CoordinateConverter.to_voxels(xyz, anisotropy, level)
         return soma_locations 
+    
+    
+    
+    def apply_simpleitk_transform(self, transform_path: str, points_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Apply a SimpleITK transform or displacement field to points.
+        
+        Parameters
+        ----------
+        transform_path : str
+            Path to the transform file (.nrrd, .tfm, etc.)
+        points_df : pd.DataFrame
+            DataFrame with points in physical coordinates (columns: x, y, z)
+            
+        Returns
+        -------
+        pd.DataFrame
+            Transformed points in physical coordinates
+        """
+        try:
+            # Check if it's a displacement field (image) or transform
+            if transform_path.endswith('.nrrd') or transform_path.endswith('.nii') or transform_path.endswith('.nii.gz'):
+                # Treat as displacement field (image)
+                displacement_field = sitk.ReadImage(transform_path)
+                
+                # Convert points to SimpleITK format
+                points_sitk = []
+                for _, row in points_df.iterrows():
+                    points_sitk.append([row['x'], row['y'], row['z']])
+                
+                # Apply displacement field
+                transformed_points = []
+                for point in points_sitk:
+                    try:
+                        # Convert point to SimpleITK format (tuple of doubles)
+                        point_tuple = tuple(float(p) for p in point)
+                        
+                        # Convert physical point to index in displacement field
+                        index = displacement_field.TransformPhysicalPointToIndex(point_tuple)
+                        
+                        # Check if index is within bounds
+                        size = displacement_field.GetSize()
+                        if (0 <= index[0] < size[0] and 
+                            0 <= index[1] < size[1] and 
+                            0 <= index[2] < size[2]):
+                            
+                            # Get displacement vector at this index
+                            displacement_vector = displacement_field.GetPixel(index)
+                            
+                            # Apply displacement to original point
+                            transformed_point = [point[i] + displacement_vector[i] for i in range(3)]
+                            transformed_points.append(transformed_point)
+                        else:
+                            # Point outside displacement field bounds, keep original
+                            print(f"Warning: Point {point} outside displacement field bounds")
+                            transformed_points.append(point)
+                            
+                    except Exception as e:
+                        print(f"Warning: Could not transform point {point}: {e}")
+                        # Keep original point if transform fails
+                        transformed_points.append(point)
+                
+                # Return as DataFrame
+                return pd.DataFrame(transformed_points, columns=["x", "y", "z"])
+                
+            else:
+                # Treat as transform file
+                transform = sitk.ReadTransform(transform_path)
+                
+                # Convert points to SimpleITK format
+                points_sitk = []
+                for _, row in points_df.iterrows():
+                    points_sitk.append([row['x'], row['y'], row['z']])
+                
+                # Apply transform
+                transformed_points = []
+                for point in points_sitk:
+                    try:
+                        transformed_point = transform.TransformPoint(point)
+                        transformed_points.append(transformed_point)
+                    except Exception as e:
+                        print(f"Warning: Could not transform point {point}: {e}")
+                        # Keep original point if transform fails
+                        transformed_points.append(point)
+                
+                # Return as DataFrame
+                return pd.DataFrame(transformed_points, columns=["x", "y", "z"])
+            
+        except Exception as e:
+            print(f"Warning: Could not load or apply transform {transform_path}: {e}")
+            # Return original points if transform fails
+            return points_df 
