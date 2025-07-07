@@ -31,7 +31,8 @@ class RegistrationPipeline:
         ccf_path: str, 
         exaspim_template_path: str, 
         transform_res: list, 
-        level: int):
+        level: int,
+        manual_transform_path: list = None):
         self.dataset_id = dataset_id
         self.output_dir = output_dir
         self.acquisition_file = acquisition_file
@@ -44,6 +45,7 @@ class RegistrationPipeline:
         self.transform_res = transform_res
         self.aligned_dir = os.path.join(self.output_dir, 'aligned')
         self.level = level
+        self.manual_transform_path = manual_transform_path if manual_transform_path is not None else []
         os.makedirs(self.aligned_dir, exist_ok=True)
 
     def load_images(self) -> tuple:
@@ -129,11 +131,16 @@ class RegistrationPipeline:
         np.ndarray
             Final CCF index coordinates.
         """
-        # register to exaspim template
+       # register to exaspim template
         ants_pts = CoordinateConverter.index_to_physical(resampled_img, resampled_cells)
         df = pd.DataFrame(ants_pts, columns=["x", "y", "z"])
+        # Dynamically set whichtoinvert based on the number of transforms
+        if len(self.brain_to_exaspim_transform_path) == 1:
+            whichtoinvert = [True]
+        else:
+            whichtoinvert = [True, False]
         ants_pts = ants.apply_transforms_to_points(
-            3, df, self.brain_to_exaspim_transform_path, whichtoinvert=[True, False]
+            3, df, self.brain_to_exaspim_transform_path, whichtoinvert=whichtoinvert
         )
         ants_pts_exaspim = np.array(ants_pts)
         idx_pts = CoordinateConverter.physical_to_index(ants_exaspim, ants_pts_exaspim)
@@ -142,15 +149,25 @@ class RegistrationPipeline:
         
         # register to ccf
         df = pd.DataFrame(ants_pts_exaspim, columns=["x", "y", "z"])
-        ants_pts = ants.apply_transforms_to_points(
-            3, df, self.exaspim_to_ccf_transform_path, whichtoinvert=[True, False]
-        )
-        ants_pts_ccf = np.array(ants_pts)
+        if self.exaspim_to_ccf_transform_path:
+            # Only apply transform if the list is not empty
+            if len(self.exaspim_to_ccf_transform_path) == 1:
+                whichtoinvert_ccf = [True]
+            else:
+                whichtoinvert_ccf = [True, False]
+            ants_pts = ants.apply_transforms_to_points(
+                3, df, self.exaspim_to_ccf_transform_path, whichtoinvert=whichtoinvert_ccf
+            )
+            ants_pts_ccf = np.array(ants_pts)
+        else:
+            # If no transform, just use the input points
+            ants_pts_ccf = np.array(df)
         idx_pts = CoordinateConverter.physical_to_index(ccf, ants_pts_ccf)
         if cell_filename:
             ImageVisualizer.soma_overlay_volumn(idx_pts, ccf.numpy(),title=f"{cell_filename}_in_ccf_space", figpath=f"{self.output_dir}/{cell_filename}_in_ccf_space")
+            
+        return idx_pts, ants_pts_ccf
                 
-        return idx_pts
 
     def check_orientation(
         self, 
