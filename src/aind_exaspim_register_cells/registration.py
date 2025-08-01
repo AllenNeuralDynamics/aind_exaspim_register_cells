@@ -44,10 +44,9 @@ class RegistrationPipeline:
         self.ccf_path = ccf_path
         self.exaspim_template_path = exaspim_template_path
         self.transform_res = transform_res
-        self.aligned_dir = os.path.join(self.output_dir, 'aligned')
         self.level = level
         self.manual_transform_path = manual_transform_path if manual_transform_path is not None else []
-        os.makedirs(self.aligned_dir, exist_ok=True)
+
 
     def load_images(self) -> tuple:
         """
