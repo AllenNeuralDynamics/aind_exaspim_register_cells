@@ -136,7 +136,9 @@ class CoordinateConverter:
         """
         scaling_factor = 1.0 / 2**level
         voxel = scaling_factor * (xyz / anisotropy)
-        return np.round(voxel).astype(int)
+        # return np.round(voxel).astype(int)
+        return voxel
+
 
     @staticmethod
     def load_soma_locations(somas_path: str, level: int) -> np.ndarray:
@@ -210,7 +212,9 @@ class CoordinateConverter:
         direction = np.asarray(ants_img.direction).reshape((3, 3))
         relative = physical_batch - origin
         index = (relative @ np.linalg.inv(direction).T) / spacing
-        return np.round(index).astype(np.int32)
+        # return np.round(index).astype(np.int32)
+        return index
+
 
     @staticmethod
     def convert_to_ants_space(template: Any, cells: np.ndarray) -> np.ndarray:

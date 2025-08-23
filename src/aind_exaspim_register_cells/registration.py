@@ -46,6 +46,8 @@ class RegistrationPipeline:
         self.transform_res = transform_res
         self.level = level
         self.manual_transform_path = manual_transform_path if manual_transform_path is not None else []
+        self.aligned_dir = os.path.join(self.output_dir, 'aligned')
+        os.makedirs(self.aligned_dir, exist_ok=True)
 
 
     def load_images(self) -> tuple:
@@ -229,11 +231,13 @@ class RegistrationPipeline:
                     2: "Left_to_right",
                 }
         swaps, flips = OrientationUtils.get_adjustments(metadata['axes'], CCF_DIRECTIONS)
+        print(f"** swaps: {swaps}, flips: {flips}**")
+
         for a, b in swaps:
             soma_locations[:, [a, b]] = soma_locations[:, [b, a]]
         image_shape = input_img.shape
         for ax in flips:
-            soma_locations[:, ax] = image_shape[ax] - 1 - soma_locations[:, ax]
+            soma_locations[:, ax] = image_shape[ax] - 1.0 - soma_locations[:, ax]
         return soma_locations
 
     def resample_isotropic(self, soma_locations: np.ndarray, scale: list) -> np.ndarray:
