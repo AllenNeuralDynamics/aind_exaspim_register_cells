@@ -1,6 +1,3 @@
-# ARCHIVE NOTICE!
-This repo is being archived.
-
 # aind_exaspim_register_cells
 
 [![License](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
