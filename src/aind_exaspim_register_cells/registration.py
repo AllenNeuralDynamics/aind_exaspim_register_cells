@@ -239,6 +239,7 @@ class RegistrationPipeline:
                 2: "Left_to_right",
             }
         else:
+            print("Alpha scope metadata has the X and Y directions inverted relative to the fused image.")
             CCF_DIRECTIONS = {
                 0: "Posterior_to_anterior",
                 1: "Inferior_to_superior",
