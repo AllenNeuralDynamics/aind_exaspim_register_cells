@@ -215,22 +215,37 @@ class RegistrationPipeline:
         """
         with open(acquisition_path, "r") as f:
             metadata = json.load(f)
+
+        # Support both old schema (imaging.acquisition: top-level 'tiles'/'axes')
+        # and new schema (core.acquisition: 'data_streams'/'coordinate_system').
+        if "tiles" in metadata:
             file_name_1st = metadata["tiles"][0]["file_name"]
-            if "tile_000000_ch_" in file_name_1st:
-                # print("The input is a Beta scope sample!!")
-                CCF_DIRECTIONS = {
-                    0: "Anterior_to_posterior",
-                    1: "Superior_to_inferior",
-                    2: "Left_to_right",
-                }
-            else:
-                # print("The input is a Alpha scope sample!!")
-                CCF_DIRECTIONS = {
-                    0: "Posterior_to_anterior",
-                    1: "Inferior_to_superior",
-                    2: "Left_to_right",
-                }
-        swaps, flips = OrientationUtils.get_adjustments(metadata['axes'], CCF_DIRECTIONS)
+            axes = metadata["axes"]
+        else:
+            file_name_1st = (
+                metadata["data_streams"][0]["configurations"][0]["images"][0]["file_name"]
+            )
+            # New schema axes use 'name' (X/Y/Z) instead of an integer 'dimension'.
+            name_to_dim = {"Z": 0, "Y": 1, "X": 2}
+            axes = [
+                {"dimension": name_to_dim[ax["name"]], "direction": ax["direction"]}
+                for ax in metadata["coordinate_system"]["axes"]
+            ]
+
+        if "tile_000000_ch_" in file_name_1st:
+            CCF_DIRECTIONS = {
+                0: "Anterior_to_posterior",
+                1: "Superior_to_inferior",
+                2: "Left_to_right",
+            }
+        else:
+            print("Alpha scope metadata has the X and Y directions inverted relative to the fused image.")
+            CCF_DIRECTIONS = {
+                0: "Posterior_to_anterior",
+                1: "Inferior_to_superior",
+                2: "Left_to_right",
+            }
+        swaps, flips = OrientationUtils.get_adjustments(axes, CCF_DIRECTIONS)
         print(f"** swaps: {swaps}, flips: {flips}**")
 
         for a, b in swaps:
