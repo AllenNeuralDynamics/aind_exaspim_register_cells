@@ -95,7 +95,7 @@ class RegistrationPipeline:
 
         soma_locations = self.soma_physical_to_index(coords, self.level+3)
         
-        oriented_cells = self.check_orientation(self.acquisition_file, soma_locations, input_img)
+        oriented_cells, scale = self.check_orientation(self.acquisition_file, soma_locations, input_img, scale)
         input_img_norm = ImageVisualizer.perc_normalization(input_img)
         if cell_filename:
             ImageVisualizer.soma_overlay_volumn(oriented_cells, input_img_norm, title=f"{cell_filename}_in_raw_data_space", figpath=f"{self.output_dir}/{cell_filename}_in_raw_data_space")
@@ -194,8 +194,9 @@ class RegistrationPipeline:
         acquisition_path: str, 
         soma_locations: np.ndarray, 
         input_img: np.ndarray,
+        scale: list,
         show: bool = False
-    ) -> np.ndarray:
+    ) -> tuple:
         """
         Adjust soma locations based on acquisition metadata orientation.
 
@@ -207,11 +208,13 @@ class RegistrationPipeline:
             Soma locations to adjust.
         input_img : np.ndarray
             Reference image for shape.
+        scale : list
+            Per-axis resampling factors, in the same column order as soma locations
 
         Returns
         -------
-        np.ndarray
-            Oriented soma locations.
+        tuple
+            Oriented soma locations, and scale reordered to match their columns.
         """
         with open(acquisition_path, "r") as f:
             metadata = json.load(f)
@@ -250,10 +253,11 @@ class RegistrationPipeline:
 
         for a, b in swaps:
             soma_locations[:, [a, b]] = soma_locations[:, [b, a]]
+            scale[a], scale[b] = scale[b], scale[a]
         image_shape = input_img.shape
         for ax in flips:
             soma_locations[:, ax] = image_shape[ax] - 1.0 - soma_locations[:, ax]
-        return soma_locations
+        return soma_locations, scale
 
     def resample_isotropic(self, soma_locations: np.ndarray, scale: list) -> np.ndarray:
         """
