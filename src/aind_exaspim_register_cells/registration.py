@@ -229,7 +229,7 @@ class RegistrationPipeline:
             name_to_dim = {"Z": 0, "Y": 1, "X": 2}
             axes = [
                 {"dimension": name_to_dim[ax["name"]], "direction": ax["direction"]}
-                for ax in metadata["coordinate_system"]["axes"]
+                for ax in (metadata.get("coordinate_system") or metadata["global_coordinate_system"])["axes"]
             ]
 
         if "tile_000000_ch_" in file_name_1st:
